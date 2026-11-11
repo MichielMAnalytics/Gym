@@ -875,8 +875,8 @@ class SimpleResponsesAPIAgent(BaseResponsesAPIAgent, AggregateMetricsMixin, Simp
             error = AgentSeedRejectedError("This agent does not implement episode sessions")
             _log_seed_refusal(body.agent_session_id, error)
             raise error
-        if self._restart_only is not None and response is not None:
-            # This agent cannot capture the session, so the episode that seeds it starts over after a crash.
+        if response is not None and (self._restart_only is not None or self._seed_restarts_after_restore(body)):
+            # The checkpoint holds none of this session, so the episode that seeds it starts over after a crash.
             response.headers[CHECKPOINT_RESTART_HEADER] = "1"
         capabilities = self._agent_continuation_capabilities() if body.continuation is not None else None
         if body.continuation is not None:
@@ -1070,6 +1070,13 @@ class SimpleResponsesAPIAgent(BaseResponsesAPIAgent, AggregateMetricsMixin, Simp
     def _agent_continuation_capabilities(self) -> AgentContinuationCapabilities | None:
         """Opt into multi-turn continuation; existing one-activation adapters stay unchanged."""
         return None
+
+    def _seed_restarts_after_restore(self, body: AgentSeedSessionRequest) -> bool:
+        """Say that a checkpoint cannot restore the session this seed starts, so its episode starts over.
+
+        The seed reply then carries the checkpoint restart header, as for an agent that captures no sessions.
+        """
+        return False
 
     async def activate_agent_session(
         self, request: Request, body: NeMoGymResponseCreateParamsNonStreaming
