@@ -510,7 +510,8 @@ async def test_exec_normal_with_cwd_and_env(fake_binary: str, monkeypatch: pytes
     assert result.error_type is None
 
     argv = rec.calls[0]["argv"]
-    assert argv[:2] == [FAKE_BINARY, "exec"]
+    # The host shell around enroot exec reports the exec's CPU after its stderr.
+    assert argv[:6] == ["/bin/sh", "-c", enroot_provider.EXEC_TIMES_SCRIPT, "sh", FAKE_BINARY, "exec"]
     assert _contains_seq(argv, ["-e", "A=b"])
     assert str(FAKE_PID) in argv
     assert argv[-3:] == ["sh", "-c", "cd /work && echo hi"]
@@ -954,3 +955,87 @@ async def test_start_detached_does_not_await_exit(fake_binary: str, tmp_path: Pa
         await proc.wait()
         out_f.close()
         err_f.close()
+
+
+@pytest.mark.parametrize(
+    ("stderr", "expected_stderr", "cpu_usec"),
+    [
+        ("warn\n\nnemo-gym-exec-cpu: 0m0.01s 0m0.00s\n0m1.500000s 1m0.25s\n", "warn\n", 61_750_000),
+        ("warn\n", "warn\n", None),  # no report (killed before it ran): nothing is counted
+        ("warn\n\nnemo-gym-exec-cpu: times: not found\n", "warn\n", None),
+        # busybox ash spaces its times; stderr without a final newline comes back unchanged.
+        ("warn\nnemo-gym-exec-cpu: 0m 0.01s 0m 0.00s\n0m 2.00s 0m 0.50s\n", "warn", 2_500_000),
+        # The command printing the marker itself does not hide the shell's report, which comes last.
+        (
+            "\nnemo-gym-exec-cpu: fake\n\nnemo-gym-exec-cpu: 0m0.00s 0m0.00s\n0m1.00s 0m0.00s\n",
+            "\nnemo-gym-exec-cpu: fake\n",
+            1_000_000,
+        ),
+    ],
+)
+async def test_exec_cpu_is_read_from_the_shell_report_and_kept_out_of_stderr(
+    fake_binary: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stderr: str, expected_stderr: str, cpu_usec
+) -> None:
+    provider, _rec, _sr = _make_provider(monkeypatch, lambda argv: (3, "out", stderr), tmp_path)
+    monkeypatch.setattr(provider._usage_reader, "host_process_usage", lambda *args, **kwargs: ())
+    handle = _make_handle(tmp_path)
+
+    result = await provider.exec(handle, "true")
+    await provider.exec(handle, "true")
+
+    assert (result.return_code, result.stdout, result.stderr) == (3, "out", expected_stderr)
+    samples = await provider.usage(handle)
+    if cpu_usec is None:
+        assert samples == ()
+    else:
+        (sample,) = samples
+        assert (sample.source, sample.scope, sample.cpu_kind) == ("exec_rusage", "process_tree", "counter")
+        assert (sample.cpu_usage_usec_total, sample.process_count) == (2 * cpu_usec, 2)
+
+
+@pytest.mark.skipif(not Path("/bin/sh").exists(), reason="no /bin/sh")
+async def test_the_exec_cpu_report_counts_a_real_child_and_keeps_its_exit_code(
+    fake_binary: str, tmp_path: Path
+) -> None:
+    provider = enroot_provider.EnrootProvider(create={"base_dir": str(tmp_path / "home")})
+    burn = "i=0; while [ $i -lt 200000 ]; do i=$((i+1)); done; echo err >&2; exit 4"
+
+    code, _out, err = await provider._run(
+        ["/bin/sh", "-c", enroot_provider.EXEC_TIMES_SCRIPT, "sh", "/bin/sh", "-c", burn], timeout_s=60
+    )
+
+    stderr, cpu_usec = enroot_provider._split_exec_cpu(err)
+    assert (code, stderr) == (4, "err\n") and cpu_usec > 0
+
+
+async def test_a_timed_out_exec_counts_no_cpu(
+    fake_binary: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def responder(argv: list[str]) -> tuple[int, str, str]:
+        raise TimeoutError("enroot command timed out")
+
+    provider, _rec, _sr = _make_provider(monkeypatch, responder, tmp_path)
+    monkeypatch.setattr(provider._usage_reader, "host_process_usage", lambda *args, **kwargs: ())
+    handle = _make_handle(tmp_path)
+
+    result = await provider.exec(handle, "sleep 100", timeout_s=1)
+
+    # The killed shell never reports, so the exec's CPU stays with the process-tree samples.
+    assert (result.error_type, result.stdout) == ("timeout", None)
+    assert await provider.usage(handle) == ()
+
+
+@pytest.mark.skipif(not Path("/bin/sh").exists(), reason="no /bin/sh")
+async def test_the_exec_cpu_report_passes_stdin_and_keeps_stderr_without_a_final_newline(
+    fake_binary: str, tmp_path: Path
+) -> None:
+    provider = enroot_provider.EnrootProvider(create={"base_dir": str(tmp_path / "home")})
+
+    code, out, err = await provider._run(
+        ["/bin/sh", "-c", enroot_provider.EXEC_TIMES_SCRIPT, "sh", "/bin/sh", "-c", "cat; printf partial >&2"],
+        timeout_s=60,
+        stdin=b"piped",
+    )
+
+    stderr, cpu_usec = enroot_provider._split_exec_cpu(err)
+    assert (code, out, stderr) == (0, "piped", "partial") and cpu_usec is not None

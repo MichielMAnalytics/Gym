@@ -40,6 +40,7 @@ import aiohttp
 from fastapi import Request, Response
 from pydantic import ConfigDict, PrivateAttr
 
+from nemo_gym.agents import observe_lent_sandbox
 from nemo_gym.client import SESSION_ID_KEY
 from nemo_gym.config import (
     AggregateMetrics,
@@ -448,6 +449,8 @@ class SearchResourcesServer(SimpleResourcesServer):
             await sandbox.stop()
         except Exception as e:  # noqa: BLE001
             print(f"[search] sandbox stop failed (ignored): {type(e).__name__}: {e}", flush=True)
+        # The agent connect()ed to this sandbox and measures nothing; record it here, usage included.
+        observe_lent_sandbox(sandbox, role="agent")
 
     # ---- Exa cache proxy ----------------------------------------------------------------------
     def setup_webserver(self):

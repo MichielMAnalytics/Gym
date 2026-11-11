@@ -5,11 +5,13 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
 
-from nemo_gym.sandbox import AsyncSandbox, SandboxHandle, SandboxSpec
-from nemo_gym.trajectory import SandboxObservation
+from nemo_gym.client import SESSION_ID_KEY
+from nemo_gym.sandbox import AsyncSandbox, SandboxExecResult, SandboxHandle, SandboxSpec, SandboxUsageSample
+from nemo_gym.trajectory import NG_VERIFIER_INVOCATIONS_KEY, SandboxObservation
 from resources_servers.swebench_pro.tests.test_app import make_server, request_body
 from resources_servers.swebench_pro.verification import VerificationResult
 
@@ -148,6 +150,86 @@ async def test_retry_success_retains_the_earlier_cleanup_failure(monkeypatch) ->
     assert legacy == {
         key: value
         for key, value in last.items()
-        if key not in {"observed_client_interval_s", "teardown_confirmed", "cleanup_errors"}
+        if key not in {"observed_client_interval_s", "teardown_confirmed", "cleanup_errors", "resource_usage"}
     }
-    assert not {"observed_client_interval_s", "teardown_confirmed", "cleanup_errors"} & legacy.keys()
+    assert not {"observed_client_interval_s", "teardown_confirmed", "cleanup_errors", "resource_usage"} & legacy.keys()
+
+
+async def test_the_task_sandbox_the_agent_borrowed_is_recorded_by_this_server_when_it_stops_it(monkeypatch) -> None:
+    server = make_server(golden=False)
+    sandbox = await AsyncSandbox(StubProvider()).start(SandboxSpec(image="task"))
+    server._session_id_to_sandbox["s"] = sandbox
+    recorded = []
+    monkeypatch.setattr(
+        "resources_servers.swebench_pro.app.observe_lent_sandbox",
+        lambda stopped, *, role: recorded.append((stopped, role, stopped.teardown_confirmed)),
+    )
+
+    await server._stop_session_sandbox("s")
+
+    # Recorded after the stop, so the observation carries the final usage sample and the confirmed teardown.
+    assert recorded == [(sandbox, "agent", True)] and "s" not in server._session_id_to_sandbox
+
+
+class MeasuredTaskProvider(StubProvider):
+    """A task sandbox that reports one container-scope usage sample and serves the patch capture."""
+
+    name = "measured"
+
+    async def create(self, spec: SandboxSpec) -> SandboxHandle:
+        return SandboxHandle(sandbox_id="task-1", provider_name=self.name, raw=None)
+
+    async def exec(self, handle, command, **kwargs) -> SandboxExecResult:
+        return SandboxExecResult(stdout="", stderr="", return_code=0)
+
+    async def download_file(self, handle, source_path, target_path) -> None:
+        target_path.write_text("")
+
+    async def usage(self, handle) -> tuple[SandboxUsageSample, ...]:
+        sample = SandboxUsageSample(
+            source="cgroup_v2",
+            scope="container",
+            sampled_at=1.0,
+            cpu_usage_usec_total=3_000_000,
+            cpu_kind="counter",
+            memory_peak_bytes=2**30,
+            peak_kind="counter",
+        )
+        return (sample,)
+
+
+def test_the_lent_task_sandbox_usage_reaches_the_persisted_verifier_invocation(monkeypatch) -> None:
+    server = make_server(golden=False, inconclusive_verification_retries=0)
+    server.server_client.global_config_dict = {"observability_enabled": True}
+
+    async def create(body, *, files):
+        return await AsyncSandbox(StubProvider()).start(SandboxSpec(image="eval"))
+
+    monkeypatch.setattr(server, "_create_sandbox", create)
+    monkeypatch.setattr("resources_servers.swebench_pro.app.run_verification", AsyncMock(return_value=_result(True)))
+    app = server.setup_webserver()
+
+    @app.post("/test_seed")
+    async def seed(request: Request) -> dict:
+        task = await AsyncSandbox(MeasuredTaskProvider()).start(SandboxSpec(image="task"))
+        server._session_id_to_sandbox[request.session[SESSION_ID_KEY]] = task
+        return {}
+
+    client = TestClient(app)
+    assert client.post("/test_seed").status_code == 200
+    body = client.post("/ng-rollout/rollout-1/verify", json=request_body()).json()
+
+    # The verify reply carries the verifier invocation that rollout collection writes into the trajectory.
+    (invocation,) = body[NG_VERIFIER_INVOCATIONS_KEY]
+    observations = [SandboxObservation.model_validate(item) for item in invocation["sandbox_observations"]]
+    (agent,) = [item for item in observations if item.role == "agent"]
+    assert (agent.sandbox_id, agent.teardown_confirmed, agent.cpu_time_s, agent.peak_memory_mib) == (
+        "task-1",
+        True,
+        3.0,
+        1024.0,
+    )
+    assert [measurement.scope for measurement in agent.resource_usage] == ["container"]
+    assert [item.role for item in observations] == ["agent"]
+    # The verifier's own sandbox stays in the reply's verifier observations; the task sandbox is not repeated there.
+    assert [item["sandbox_id"] for item in body["verifier_sandbox_observations"]] == ["stub-1"]

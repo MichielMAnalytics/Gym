@@ -47,6 +47,7 @@ from nemo_gym.agents import (
     BaseResponsesAPIAgentConfig,
     Body,
     SimpleResponsesAPIAgent,
+    record_resource_usage,
     restricted_network_policy,
     sandbox_server_url,
     seed_mcp_servers,
@@ -1959,6 +1960,10 @@ class OpenCodeSandboxedAgent(SimpleResponsesAPIAgent):
                     self._sandbox_id_to_sandbox.pop(session_key, None)
                     self._sandbox_id_to_run_result.pop(session_key, None)
 
+        # Measured by the stop above; a sandbox this agent connected to is measured by its creator instead.
+        for record in observations.records if observations is not None else ():
+            if isinstance(record, SandboxObservation) and record.role == "agent":
+                record_resource_usage(record, sandbox)
         response_dict |= run_result
         if trajectory is not None:
             response_dict["ng_trajectory"] = scope_opencode_trajectory(trajectory, body, rollout_id)

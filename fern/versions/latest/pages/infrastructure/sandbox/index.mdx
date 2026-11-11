@@ -345,6 +345,43 @@ finally:
     await sandbox.stop()
 ```
 
+## Measured CPU and Memory
+
+A sandbox started through `AsyncSandbox.start()` records its measured CPU and memory when its provider implements
+`SupportsSandboxUsage`: one sample right after create, one in `stop()` before close, and, for a process-tree
+measurement, one every `NEMO_GYM_SANDBOX_USAGE_SAMPLE_INTERVAL_SECONDS` (default 5; 0 disables periodic samples).
+`NEMO_GYM_SANDBOX_USAGE=0` disables sampling. A sandbox rebuilt with `connect()` records nothing; its creator does.
+A server that lends a sandbox to an agent (the agent `connect()`s to it) records it with `observe_lent_sandbox()`
+from `nemo_gym.agents` after stopping it during `/verify`: the verification's `sandbox_observations` then hold a
+`role="agent"` observation with the usage, and the agent's own record of that sandbox stays without usage. A lent
+sandbox stopped only by a session close, with no verification, is not recorded.
+
+After `stop()`, `sandbox.resource_usage` holds one summary per measured scope, and `lifecycle_observation()` and
+`record_resource_usage()` from `nemo_gym.agents` copy it to `SandboxObservation.resource_usage`:
+
+| Provider | Source | Scope |
+| --- | --- | --- |
+| Docker | the container's cgroup v2, on the host when the daemon is local, otherwise read from inside the container | `container` |
+| Apptainer | the instance's cgroup when Apptainer created one; otherwise as Enroot | `container` |
+| Enroot | the live processes in the container's PID or mount namespace; the CPU of each completed `exec`; the cgroup it shares with Gym | `process_tree`, `shared_step` |
+
+Other providers, including OpenSandbox, report no usage yet.
+
+- `container` values are kernel counters for the sandbox's own cgroup; memory includes page cache.
+  `SandboxObservation.cpu_time_s` and `peak_memory_mib` repeat them.
+- `process_tree` values come from `/proc`, and `source` names the namespaces that selected the processes:
+  `procfs_pidns`, `procfs_mntns` or `procfs_pidns_mntns`. Enroot nested in another container shares Gym's PID
+  namespace, so its processes are found by their mount namespace. The values are lower bounds of the container's
+  usage: resident memory excludes page cache and kernel memory, and the CPU of a process that exits between two
+  samples is missing after its last sample, so short commands are under-counted: on Enroot nested in a Slurm
+  container, process-tree CPU missed 27-57% of the CPU the sandbox's own processes reported.
+- `exec_rusage` (Enroot) is the CPU of the commands `exec` ran to completion in the process that created the
+  sandbox, read from the kernel's accounting of each command's reaped process tree. It is exact for those commands,
+  so it counts short commands the process-tree samples miss, but it leaves out processes a command left running.
+  It overlaps the process tree, so the two are separate measurements and are never added together.
+- `shared_step` is a cgroup the sandbox shares with Gym and its sibling sandboxes, such as a Slurm job step.
+  Its `cpu_usage_usec_delta` is everything in that cgroup while the sandbox lived; never one sandbox's cost.
+
 ## Image Rewrites
 
 Use `rewrite_image()` when a benchmark's upstream image needs to run through an internal registry mirror.

@@ -35,7 +35,7 @@ from fastapi import Body, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from nemo_gym.agents import lifecycle_observation, restricted_network_policy, sandbox_server_url
+from nemo_gym.agents import lifecycle_observation, observe_lent_sandbox, restricted_network_policy, sandbox_server_url
 from nemo_gym.agents.utils.verify_call import is_verify_transport_error
 from nemo_gym.client import SESSION_ID_KEY
 from nemo_gym.config import ModelServerRef, get_global_config_dict
@@ -396,6 +396,8 @@ class SWEBenchProResourcesServer(SimpleResourcesServer):
             async with asyncio.timeout(self.config.verification_stop_timeout):
                 await sandbox.stop()
             self._session_id_to_sandbox.pop(session_id, None)
+            # The agent borrowed this sandbox and measures nothing; its owner records it, usage included.
+            observe_lent_sandbox(sandbox, role="agent")
         self._session_id_to_pristine_untracked.pop(session_id, None)
 
     async def shutdown(self) -> None:
@@ -800,7 +802,7 @@ class SWEBenchProResourcesServer(SimpleResourcesServer):
             "verifier_sandbox_observation": {
                 key: value
                 for key, value in verifier_sandbox_observation.items()
-                if key not in {"observed_client_interval_s", "teardown_confirmed", "cleanup_errors"}
+                if key not in {"observed_client_interval_s", "teardown_confirmed", "cleanup_errors", "resource_usage"}
             }
             if verifier_sandbox_observation is not None
             else None,

@@ -29,6 +29,7 @@ from typing import Annotated, Any
 from fastapi import Request
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
+from nemo_gym.agents import observe_lent_sandbox
 from nemo_gym.client import SESSION_ID_KEY
 from nemo_gym.config import ModelServerRef, get_first_server_config_dict, get_global_config_dict
 from nemo_gym.core import (
@@ -860,6 +861,7 @@ class DeepSWEResourcesServer(SandboxSessionResourcesServer):
                         await self.stop_task_sandbox_after_capture(session_id)
                     else:
                         await self._stop_sandbox(agent_session.sandbox, task_id=current_task_id, phase="agent")
+                        observe_lent_sandbox(agent_session.sandbox, role="agent")
 
         patch_sha256 = hashlib.sha256(model_patch).hexdigest()
         log_dir = _resolve_repo_path(self.config.logs_dir) / current_task_id / session_id

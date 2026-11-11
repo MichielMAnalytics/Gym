@@ -43,6 +43,7 @@ import anyio
 from fastapi import FastAPI, Request
 from pydantic import BaseModel, ValidationError
 
+from nemo_gym.agents import observe_lent_sandbox
 from nemo_gym.client import SESSION_ID_KEY
 from nemo_gym.core import SESSION_EXPIRED, SESSION_LOST, EpisodeId
 from nemo_gym.sandbox import AsyncSandbox, DirectSandboxConnection, SandboxAccess
@@ -319,6 +320,8 @@ class SandboxSessionResourcesServer(SimpleResourcesServer):
             # Forget the sandbox only once it stopped, so a failed stop can be retried.
             await _stop(sandbox)
             self._session_id_to_sandbox.pop(session_id, None)
+            # The agent borrowed this sandbox and measures nothing; its owner records it, usage included.
+            observe_lent_sandbox(sandbox, role="agent")
         self._forget_task_sandbox_state(session_id)
 
     async def _stop_failed_seed_sandbox(self, session_id: str) -> bool:
@@ -451,6 +454,7 @@ class SandboxSessionResourcesServer(SimpleResourcesServer):
         try:
             await _stop(sandbox)
             self._session_id_to_sandbox.pop(session_id, None)
+            observe_lent_sandbox(sandbox, role="agent")
             self._forget_task_sandbox_state(session_id)
         except BaseException as error:
             if not isinstance(error, Exception):

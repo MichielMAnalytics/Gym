@@ -965,3 +965,19 @@ async def test_a_verify_that_claims_the_task_sandbox_and_fails_does_not_block_cl
 
     await asyncio.wait_for(server.close_resources_session(_request(), _close_request()), timeout=2)
     server._sandboxes[0].stop.assert_awaited_once()
+
+
+def test_the_owner_records_the_task_sandbox_it_lent_once_it_stopped(monkeypatch: MonkeyPatch) -> None:
+    server = _server()
+    recorded = []
+    monkeypatch.setattr(
+        sandbox_sessions, "observe_lent_sandbox", lambda sandbox, *, role: recorded.append((sandbox, role))
+    )
+    with TestClient(server.setup_webserver(), raise_server_exceptions=False) as client:
+        assert client.post("/seed_session", json=_seed()).status_code == 200
+        assert recorded == []
+        assert client.post("/close_session", json=_close()).status_code == 200
+
+    # The agent connect()ed to the sandbox and measures nothing; its creator records it after the stop.
+    assert recorded == [(server._sandboxes[0], "agent")]
+    server._sandboxes[0].stop.assert_awaited_once()

@@ -61,6 +61,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from fastapi import FastAPI, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from nemo_gym.agents import observe_lent_sandbox
 from nemo_gym.client import SESSION_ID_KEY
 from nemo_gym.config import get_global_config_dict
 from nemo_gym.core import PROVIDER_REQUEST_FAILED, VERIFIER_ERROR, EpisodeId, NgFailureEvent, TaskId
@@ -815,6 +816,8 @@ class VibenchResourcesServer(SimpleResourcesServer):
     async def _release_sandbox(self, session: _BuildSession) -> None:
         if session.sandbox is not None:
             await session.sandbox.stop()
+            # The agent connect()ed to this sandbox and measures nothing; record it here, usage included.
+            observe_lent_sandbox(session.sandbox, role="agent")
             session.sandbox = None
 
     async def _release(self, session: _BuildSession) -> None:

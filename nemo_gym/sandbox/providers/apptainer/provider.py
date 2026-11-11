@@ -40,7 +40,9 @@ from nemo_gym.sandbox.providers.base import (
     SandboxResources,
     SandboxSpec,
     SandboxStatus,
+    SandboxUsageSample,
 )
+from nemo_gym.sandbox.providers.usage import ProcessTreeState, ProcfsUsageReader
 from nemo_gym.sandbox.providers.utils import coerce_config as _coerce_config
 from nemo_gym.sandbox.providers.utils import path_under_mount as _path_under_mount
 
@@ -166,6 +168,8 @@ class _ApptainerInstance:
     mount_point: str  # where the folder shows up inside
     image: str  # what it was built from
     env: dict[str, str] = field(default_factory=dict)
+    init_pid: int | None = None  # host PID of the instance, resolved by the first usage sample
+    usage_state: ProcessTreeState = field(default_factory=ProcessTreeState)
 
 
 def _resource_flags(resources: SandboxResources) -> list[str]:
@@ -812,6 +816,25 @@ class ApptainerProvider:
 
         if stop_error is not None:
             raise stop_error
+
+    async def usage(self, handle: SandboxHandle) -> tuple[SandboxUsageSample, ...]:
+        """The instance's own cgroup when Apptainer created one for its resource limits; otherwise the process
+        tree in its namespaces plus the cgroup it shares with Gym (``shared_step``)."""
+        inst = handle.raw
+        if inst.init_pid is None:
+            code, out, _err = await self._run([self._binary, "instance", "list", "--json", inst.name], timeout_s=30)
+            try:
+                entries = json.loads(out).get("instances", []) if code == 0 else []
+            except (json.JSONDecodeError, AttributeError):
+                entries = []
+            pids = [entry.get("pid") for entry in entries if entry.get("instance") == inst.name]
+            if len(pids) != 1 or not isinstance(pids[0], int) or pids[0] <= 0:
+                return ()
+            inst.init_pid = pids[0]
+        reader = ProcfsUsageReader()
+        return await asyncio.to_thread(
+            reader.host_process_usage, inst.init_pid, inst.usage_state, own_cgroup_scope="container"
+        )
 
     async def aclose(self) -> None:
         """No provider-wide resources to close."""

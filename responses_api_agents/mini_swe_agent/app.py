@@ -55,6 +55,7 @@ from nemo_gym.agents import (
     SandboxSession,
     SimpleResponsesAPIAgent,
     assert_model_url_reachable_from_sandbox,
+    record_resource_usage,
     resolve_agent_timeout,
     restrict_sandbox_network,
 )
@@ -465,6 +466,10 @@ class MiniSWEAgent(SimpleResponsesAPIAgent):
         observations = state.observations or AgentObservationBundle(
             source="mini_swe", gaps=[ObservationGap(code="observation_capture_failed")]
         )
+        # Close stopped an owned sandbox and took its last usage sample; a borrowed one is measured by its owner.
+        for record in observations.records:
+            if isinstance(record, SandboxObservation) and record.role == "agent":
+                record_resource_usage(record, state.session.sandbox)
         return AgentCloseSessionResponse(
             agent_session_id=state.request.agent_session_id,
             agent_observations=observations,

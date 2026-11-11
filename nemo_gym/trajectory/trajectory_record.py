@@ -405,6 +405,37 @@ def tool_parent_cycles(tools: Iterable[ToolCallObservation]) -> set[tuple[str | 
     return cyclic
 
 
+class SandboxUsageMeasurement(ObservationModel):
+    """Measured CPU and memory of one sandbox from one accounting source, over the samples its owner took.
+
+    ``scope`` says what the numbers cover: ``container`` is the sandbox's own cgroup; ``process_tree`` is the
+    live processes in its namespaces, a lower bound of the container's usage (no page cache or kernel memory,
+    and no CPU of processes that exited between samples); ``shared_step`` is a cgroup the sandbox shares with
+    Gym and sibling sandboxes, whose ``cpu_usage_usec_delta`` covers all of them while this sandbox lived.
+    A ``sampled_lower_bound`` kind is the largest value observed, so the true value may be higher.
+    """
+
+    source: str = Field(
+        description="Accounting read: cgroup_v2; procfs_pidns / procfs_mntns / procfs_pidns_mntns for the "
+        "namespaces that selected the process tree; exec_rusage for the CPU of completed execs."
+    )
+    scope: Literal["container", "process_tree", "shared_step"]
+    clock: str = Field(description="Clock of the sample times, such as gym_host (Unix time on the Gym host).")
+    first_sampled_at: float
+    last_sampled_at: float
+    sample_count: int = Field(ge=1)
+    cpu_usage_usec_total: Optional[int] = Field(default=None, ge=0)
+    cpu_usage_usec_delta: Optional[int] = Field(default=None, ge=0)
+    cpu_kind: Optional[Literal["counter", "sampled_lower_bound"]] = None
+    memory_peak_bytes: Optional[int] = Field(default=None, ge=0)
+    peak_kind: Optional[Literal["counter", "sampled_lower_bound"]] = None
+    memory_current_bytes: Optional[int] = Field(default=None, ge=0)
+    memory_anon_bytes: Optional[int] = Field(default=None, ge=0)
+    memory_file_bytes: Optional[int] = Field(default=None, ge=0)
+    includes_page_cache: Optional[bool] = None
+    process_count: Optional[int] = Field(default=None, ge=0)
+
+
 class SandboxObservation(ObservationModel):
     """Outcome and lifetime resource usage reported by a sandbox-owning harness."""
 
@@ -429,6 +460,11 @@ class SandboxObservation(ObservationModel):
         description="Measured sandbox high-water mark, never its configured memory limit.",
     )
     resource_usage_source: Optional[str] = None
+    resource_usage: Optional[list[SandboxUsageMeasurement]] = Field(
+        default=None,
+        description="Measured usage by scope, recorded only by the sandbox's creator; cpu_time_s and "
+        "peak_memory_mib repeat its container-scope counters.",
+    )
     error_type: Optional[str] = None
     error_message: Optional[str] = None
     failure_id: Optional[str] = Field(

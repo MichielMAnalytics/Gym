@@ -1228,3 +1228,43 @@ async def test_a_network_policy_the_provider_cannot_enforce_closes_the_provider(
         await agent._seed_agent_session_state(seed(sandbox_access=None))
     sandbox.provider.aclose.assert_awaited_once()
     sandbox.box.start.assert_not_awaited()
+
+
+async def test_close_adds_the_owned_sandbox_usage_to_its_observation(agent) -> None:
+    from nemo_gym.sandbox import AsyncSandbox, SandboxHandle, SandboxSpec, SandboxUsageSample
+
+    class MeasuredProvider:
+        name = "measured"
+
+        async def create(self, spec):
+            return SandboxHandle(sandbox_id="task-box", provider_name=self.name, raw=None)
+
+        async def usage(self, handle):
+            sample = SandboxUsageSample(
+                source="cgroup_v2",
+                scope="container",
+                sampled_at=1.0,
+                cpu_usage_usec_total=4_000_000,
+                cpu_kind="counter",
+            )
+            return (sample,)
+
+        async def close(self, handle):
+            return None
+
+        async def aclose(self):
+            return None
+
+    sandbox = await AsyncSandbox(MeasuredProvider()).start(SandboxSpec(image="task"))
+    await sandbox.stop()
+    state = state_for(agent)
+    finish_run(state, trajectory=native_trajectory())
+    bind(agent, state)
+    await asyncio.wait_for(agent.responses(http_request(state), body()), timeout=5)
+    state.session.sandbox = sandbox
+    state.session.close = AsyncMock()
+
+    closed = await agent._close_agent_session_state(state)
+
+    (observation,) = [record for record in closed.agent_observations.records if record.kind == "sandbox"]
+    assert observation.cpu_time_s == 4.0 and observation.resource_usage[0].scope == "container"

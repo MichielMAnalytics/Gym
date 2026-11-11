@@ -17,6 +17,7 @@ from uuid import uuid4
 from fastapi import HTTPException, Request
 from pydantic import ConfigDict, Field
 
+from nemo_gym.agents import observe_lent_sandbox
 from nemo_gym.client import SESSION_ID_KEY
 from nemo_gym.config import get_global_config_dict
 from nemo_gym.sandbox import (
@@ -288,6 +289,8 @@ class JobBenchResourcesServer(SimpleResourcesServer):
                     await sandbox.stop()
                 except Exception:
                     LOG.warning("Job-Bench task sandbox cleanup failed for task %s", body.task_id, exc_info=True)
+                # The agent connect()ed to this sandbox and measures nothing; record it here, usage included.
+                observe_lent_sandbox(sandbox, role="agent")
 
         response = JobBenchVerifyResponse(
             **body.model_dump(),

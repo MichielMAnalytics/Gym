@@ -35,6 +35,7 @@ from typing import Any
 from fastapi import Request
 from pydantic import BaseModel, ConfigDict
 
+from nemo_gym.agents import observe_lent_sandbox
 from nemo_gym.client import SESSION_ID_KEY
 from nemo_gym.config import get_global_config_dict
 from nemo_gym.sandbox import (
@@ -294,6 +295,8 @@ class SwemerOmlResourcesServer(SimpleResourcesServer):
             )
         finally:
             await self._stop_sandbox(original_sandbox)
+            # The agent connect()ed to this sandbox and measures nothing; record it here, usage included.
+            observe_lent_sandbox(original_sandbox, role="agent")
 
     async def seed_session(self, request: Request, body: SwemerOmlSeedSessionRequest) -> SwemerOmlSeedSessionResponse:
         """Start the instance's image so an agent can work in it."""

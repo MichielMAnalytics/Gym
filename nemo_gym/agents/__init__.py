@@ -64,7 +64,11 @@ if TYPE_CHECKING:
     from nemo_gym.agents.testing.failure_assertions import raises_agent_failure
     from nemo_gym.agents.utils.ordered_operations import ActivationConflictError, OrderedOperationLedger
     from nemo_gym.agents.utils.sandbox_network import SandboxNetworkAccess, restrict_sandbox_network
-    from nemo_gym.agents.utils.sandbox_observation import lifecycle_observation
+    from nemo_gym.agents.utils.sandbox_observation import (
+        lifecycle_observation,
+        observe_lent_sandbox,
+        record_resource_usage,
+    )
     from nemo_gym.agents.utils.sandbox_python import SandboxPythonRuntime, probe_sandbox_platform
     from nemo_gym.agents.utils.sandbox_session import (
         HARNESS_COMMAND_NOT_STARTED,
@@ -145,9 +149,11 @@ _PUBLIC_API = {
     "harness_termination_failure": "utils.supervisor_client",
     "is_harness_termination_failure": "utils.supervisor_client",
     "lifecycle_observation": "utils.sandbox_observation",
+    "observe_lent_sandbox": "utils.sandbox_observation",
     "parse_cleanup_receipt": "utils.supervisor_client",
     "probe_sandbox_platform": "utils.sandbox_python",
     "raises_agent_failure": "testing.failure_assertions",
+    "record_resource_usage": "utils.sandbox_observation",
     "resolve_agent_timeout": "utils.task_timeout",
     "restrict_sandbox_network": "utils.sandbox_network",
     "restricted_network_policy": "agent_tools",

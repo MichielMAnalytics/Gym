@@ -18,6 +18,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from pydantic import Field, model_validator
 
+from nemo_gym.agents import observe_lent_sandbox
 from nemo_gym.client import SESSION_ID_KEY
 from nemo_gym.config import ModelServerRef, get_global_config_dict
 from nemo_gym.core import ENVIRONMENT_SERVER_FAILED, SESSION_LOST, VERIFIER_ERROR
@@ -266,10 +267,13 @@ class DeepsweExternal1ResourcesServer(DeepSWEResourcesServer):
     async def _release_sandbox(self, sandbox: AsyncSandbox, *, task_id: str, phase: str) -> bool:
         try:
             await sandbox.stop()
-            return True
         except Exception:
             logger.exception("Could not release %s sandbox for %s", phase, task_id)
             return False
+        if phase == "agent":
+            # The agent works in this sandbox without measuring it; its owner records it, usage included.
+            observe_lent_sandbox(sandbox, role="agent")
+        return True
 
     async def seed_session(
         self, request: Request, body: DeepsweExternal1SeedSessionRequest

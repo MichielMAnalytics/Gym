@@ -21,7 +21,7 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from nemo_gym import PARENT_DIR
-from nemo_gym.agents import OutcomeAction, OutcomePolicyConfig, failure_outcome_policy
+from nemo_gym.agents import OutcomeAction, OutcomePolicyConfig, failure_outcome_policy, observe_lent_sandbox
 from nemo_gym.client import SESSION_ID_KEY
 from nemo_gym.config import get_global_config_dict
 from nemo_gym.core import (
@@ -343,6 +343,8 @@ class TerminalBench21ResourcesServer(SimpleResourcesServer):
                 await sandbox.stop()
             # Keep ownership when stop fails so close can retry.
             self._session_id_to_sandbox.pop(session_id, None)
+            # The agent connect()ed to this sandbox and measures nothing; record it here, usage included.
+            observe_lent_sandbox(sandbox, role="agent")
 
     async def close_resources_session(self, body: ResourcesCloseSessionRequest) -> ResourcesCloseSessionResponse:
         """Mark the session as closing, stop the owned sandbox, and fence the session for the close retry window.

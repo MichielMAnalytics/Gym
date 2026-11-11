@@ -48,6 +48,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from nemo_gym.agents import observe_lent_sandbox
 from nemo_gym.client import SESSION_ID_KEY
 from nemo_gym.config import get_global_config_dict
 from nemo_gym.core import PROVIDER_UNAVAILABLE, SESSION_LOST, VERIFIER_ERROR, EpisodeId
@@ -456,6 +457,8 @@ class ScaleSWEResourcesServer(SimpleResourcesServer):
             )
         finally:
             await self._stop_sandbox(original_sandbox)
+            # The agent connect()ed to this sandbox and measures nothing; record it here, usage included.
+            observe_lent_sandbox(original_sandbox, role="agent")
 
     async def _capture_model_patch(self, session_id: str, workdir: str) -> PatchCapture:
         """Capture an episode session's patch per ``config.patch_capture_mode``, then stop its sandbox.

@@ -50,6 +50,7 @@ from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set,
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from nemo_gym.agents import observe_lent_sandbox
 from nemo_gym.artifacts import NG_FAILURE_CLASS_KEY
 from nemo_gym.client import SESSION_ID_KEY, get_server_url
 from nemo_gym.config import AggregateMetrics, AggregateMetricsRequest, ModelServerRef
@@ -852,6 +853,8 @@ class GDPValResourcesServer(SimpleResourcesServer):
     async def _release(self, session: _TaskSession) -> None:
         if session.sandbox is not None:
             await session.sandbox.stop()
+            # The agent connect()ed to this sandbox and measures nothing; record it here, usage included.
+            observe_lent_sandbox(session.sandbox, role="agent")
             session.sandbox = None
         await asyncio.to_thread(shutil.rmtree, session.reference_dir, ignore_errors=True)
 

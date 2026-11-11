@@ -130,6 +130,7 @@ class TestApp:
             "cpu_time_s": None,
             "peak_memory_mib": None,
             "resource_usage_source": None,
+            "resource_usage": None,
             "error_type": None,
             "error_message": None,
             "failure_id": None,
