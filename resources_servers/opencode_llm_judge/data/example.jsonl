@@ -1,0 +1,1 @@
+{"task_id": "synthetic-capital", "responses_create_params": {"input": [{"role": "user", "content": "What is the capital of France?"}]}, "expected_answer": "Paris"}
